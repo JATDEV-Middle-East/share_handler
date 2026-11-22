@@ -4,7 +4,7 @@ import Photos
 import Intents
 import share_handler_ios_models
 
-public class SwiftShareHandlerIosPlatform: NSObject, FlutterPlugin, FlutterStreamHandler, ShareHandlerApi {
+public class SwiftShareHandlerIosPlatform: NSObject, FlutterPlugin, FlutterStreamHandler, ShareHandlerApi, FlutterSceneLifeCycleDelegate {
     
     
     //     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -27,6 +27,12 @@ public class SwiftShareHandlerIosPlatform: NSObject, FlutterPlugin, FlutterStrea
     // -> see Example app
     public static let instance = SwiftShareHandlerIosPlatform()
 
+    private static var applicationDelegateAdded = false
+
+    // Flutter sends a scene event once for each engine of the scene. These skip the repeats of the last one.
+    private weak var lastSceneEvent: AnyObject?
+    private var lastSceneEventHandled = false
+
     public static func register(with registrar: FlutterPluginRegistrar) {
         let messenger : FlutterBinaryMessenger = registrar.messenger()
         let api : ShareHandlerApi & NSObjectProtocol = instance
@@ -35,7 +41,13 @@ public class SwiftShareHandlerIosPlatform: NSObject, FlutterPlugin, FlutterStrea
         let eventsChannel = FlutterEventChannel(name: kEventsChannel, binaryMessenger: messenger)
         eventsChannel.setStreamHandler(instance)
 
-        registrar.addApplicationDelegate(instance)
+        // Flutter shares the app delegate between engines, so it is added once. Scene events go to the delegates
+        // of each engine in the scene, so every engine adds the instance and it skips the repeats.
+        if !applicationDelegateAdded {
+            applicationDelegateAdded = true
+            registrar.addApplicationDelegate(instance)
+        }
+        registrar.addSceneDelegate(instance)
     }
 
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
@@ -110,6 +122,43 @@ public class SwiftShareHandlerIosPlatform: NSObject, FlutterPlugin, FlutterStrea
             }
         }
         return false
+    }
+
+    // On the UIScene lifecycle iOS hands the URL that opens the app to the scene, not to the app delegate.
+
+    // The shared link or file that launched the app.
+    public func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options connectionOptions: UIScene.ConnectionOptions?) -> Bool {
+        guard let options = connectionOptions else { return false }
+        return handleSceneEvent(options) {
+            if let context = options.urlContexts.first(where: { self.hasMatchingSchemePrefix(url: $0.url) }) {
+                return self.handleUrl(url: context.url, setInitialData: true)
+            }
+            for activity in options.userActivities {
+                if let url = activity.webpageURL, self.hasMatchingSchemePrefix(url: url) {
+                    return self.handleUrl(url: url, setInitialData: true)
+                }
+            }
+            return false
+        }
+    }
+
+    // A shared link or file while the app runs.
+    public func scene(_ scene: UIScene, openURLContexts URLContexts: Set<UIOpenURLContext>) -> Bool {
+        guard let context = URLContexts.first(where: { hasMatchingSchemePrefix(url: $0.url) }) else { return false }
+        return handleSceneEvent(context) { self.handleUrl(url: context.url, setInitialData: false) }
+    }
+
+    // A user activity carrying a shared link, like application(_:continue:restorationHandler:).
+    public func scene(_ scene: UIScene, continue userActivity: NSUserActivity) -> Bool {
+        guard let url = userActivity.webpageURL, hasMatchingSchemePrefix(url: url) else { return false }
+        return handleSceneEvent(userActivity) { self.handleUrl(url: url, setInitialData: true) }
+    }
+
+    private func handleSceneEvent(_ event: AnyObject, _ handle: () -> Bool) -> Bool {
+        if event === lastSceneEvent { return lastSceneEventHandled }
+        lastSceneEvent = event
+        lastSceneEventHandled = handle()
+        return lastSceneEventHandled
     }
 
     private func handleUrl(url: URL?, setInitialData: Bool) -> Bool {

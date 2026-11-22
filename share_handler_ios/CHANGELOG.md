@@ -1,3 +1,5 @@
+# Unreleased (JATDEV-Middle-East fork)
+Supports the UIScene lifecycle (Flutter 3.38+). The plugin registers as a scene delegate as well as an app delegate, so a shared link or file reaches Dart in an app that has moved to `FlutterSceneDelegate`: iOS hands the URL to the scene (`scene(_:willConnectTo:options:)` when it launches the app, `scene(_:openURLContexts:)` and `scene(_:continue:)` while it runs) rather than to the app delegate. The app delegate is added once and a scene event that more than one engine forwards is handled once. The minimum Flutter version is now 3.38.0 and the podspec's iOS platform is 13.0, where UIScene exists.
 # 0.0.15
 Fix for iOS 18
 Fix getFileName function to handle duplicate filenames
